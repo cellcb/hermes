@@ -1,8 +1,6 @@
 #!/bin/bash
 # DESC: 从RAR中提取8K/4K ed2k链接
 
-set -e
-
 # 参数解析
 AUTO_DELETE=false
 DOWNLOAD_DIR="$HOME/Downloads"
@@ -30,23 +28,21 @@ UNAR_PATH="unar"
 declare -a no_match_vr_files
 declare -a no_match_4k_files
 
+# 记录已处理的VR文件，避免第二轮重复处理
+processed_files=""
+
 # 查找包含"vr"字符的rar文件
-find "$DOWNLOAD_DIR" -name "*vr*.rar" | while read -r rar_file; do
-    # 获取rar文件的基本名称（不含扩展名）
+while IFS= read -r rar_file; do
     base_name=$(basename "$rar_file" .rar)
+    processed_files="$processed_files|$rar_file"
 
-    # 创建一个临时目录用于解压
     temp_dir=$(mktemp -d)
-
-    # 使用指定的unar工具解压rar文件到临时目录，抑制所有输出
     "$UNAR_PATH" "$rar_file" -o "$temp_dir" >/dev/null 2>&1
 
-    # 查找解压后的txt文件
-    txt_file=$(find "$temp_dir" -name "$base_name.txt" 2>/dev/null)
+    txt_file=$(find "$temp_dir" -name "$base_name.txt" 2>/dev/null | head -1)
 
     if [ -f "$txt_file" ]; then
-        # 查找以 ed2k 开头且包含 8K 的行，忽略大小写，只输出匹配行
-        matches=$(grep -i "^ed2k.*8k.*\.mp4" "$txt_file")
+        matches=$(grep -i "^ed2k.*8k.*\.mp4" "$txt_file" || true)
         if [ -n "$matches" ]; then
             echo "$matches"
             if [ "$AUTO_DELETE" = true ]; then
@@ -60,32 +56,24 @@ find "$DOWNLOAD_DIR" -name "*vr*.rar" | while read -r rar_file; do
         no_match_vr_files+=("$rar_file")
     fi
 
-    # 清理临时目录
     rm -rf "$temp_dir" >/dev/null 2>&1
-done
-# find "$DOWNLOAD_DIR" -name "*_4K.rar" | while read -r rar_file; do
+done < <(find "$DOWNLOAD_DIR" -maxdepth 1 -name "*vr*.rar")
 
-find "$DOWNLOAD_DIR" -name "*.rar" | while read -r rar_file; do
-    # 获取rar文件的基本名称（不含扩展名）
+# 查找 _4K.rar 文件，跳过已处理的VR文件
+while IFS= read -r rar_file; do
+    # 跳过已在VR循环中处理的文件
+    echo "$processed_files" | grep -qF "$rar_file" && continue
+
     base_name=$(basename "$rar_file" _4K.rar)
-
-    # 创建一个临时目录用于解压
     temp_dir=$(mktemp -d)
-
-    # 使用指定的unar工具解压rar文件到临时目录，抑制所有输出
     "$UNAR_PATH" "$rar_file" -o "$temp_dir" >/dev/null 2>&1
 
-    # 查找解压后的txt文件œ
-    txt_file=$(find "$temp_dir" -name "$base_name.txt" 2>/dev/null)
+    txt_file=$(find "$temp_dir" -name "$base_name.txt" 2>/dev/null | head -1)
 
     if [ -f "$txt_file" ]; then
-        # 查找以 ed2k 开头且包含 4K 的行，忽略大小写，只输出匹配行
-        matches1=$(grep -i "^ed2k.*4K60fps.mp4" "$txt_file")
-        matches2=$(grep -i "^ed2k.*4k.*mp4" "$txt_file")
-        
-        if [ -n "$matches1" ] || [ -n "$matches2" ]; then
-            [ -n "$matches1" ] && echo "$matches1"
-            [ -n "$matches2" ] && echo "$matches2"
+        matches=$(grep -i "^ed2k.*4k.*\.mp4" "$txt_file" || true)
+        if [ -n "$matches" ]; then
+            echo "$matches"
             if [ "$AUTO_DELETE" = true ]; then
                 rm -f "$rar_file"
                 echo "  [已删除] $rar_file" >&2
@@ -97,9 +85,8 @@ find "$DOWNLOAD_DIR" -name "*.rar" | while read -r rar_file; do
         no_match_4k_files+=("$rar_file")
     fi
 
-    # 清理临时目录
     rm -rf "$temp_dir" >/dev/null 2>&1
-done
+done < <(find "$DOWNLOAD_DIR" -maxdepth 1 -name "*_4K.rar")
 
 # 输出没有匹配的文件
 echo ""
@@ -110,7 +97,7 @@ if [ ${#no_match_vr_files[@]} -gt 0 ]; then
 fi
 
 if [ ${#no_match_4k_files[@]} -gt 0 ]; then
-    echo "所有 RAR 文件中没有找到 4K 内容的："
+    echo "_4K 文件中没有找到 4K 内容的："
     printf '%s\n' "${no_match_4k_files[@]}"
 fi
 
