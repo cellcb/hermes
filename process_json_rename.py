@@ -24,8 +24,26 @@ import csv
 import re
 import argparse
 import sys
+import urllib.request
 from pathlib import Path
 from playwright.sync_api import sync_playwright
+
+
+SITE_PREFIXES = ("hhd800.com@", "4k2.me@")
+ID_STRIP_SUFFIXES = ("hhb", "ch")
+
+
+def strip_site_prefix(filename):
+    """去掉站点前缀，返回前缀后的部分；无匹配则返回原文件名"""
+    for prefix in SITE_PREFIXES:
+        if filename.startswith(prefix):
+            return filename[len(prefix):]
+    return filename
+
+
+def is_jav_code(video_id):
+    """判断是否为标准番号格式（如 ABF-284, DASS-821）"""
+    return bool(re.match(r'^[A-Z]+-\d+$', video_id))
 
 
 def extract_video_id(filename):
@@ -38,16 +56,18 @@ def extract_video_id(filename):
     Returns:
         视频编号，例如 "mfyd00001"，如果提取失败则返回 None
     """
-    if not filename.startswith("hhd800.com@"):
-        return None
-
-    # 去掉 "hhd800.com@" 前缀
-    after_prefix = filename[len("hhd800.com@"):]
+    after_prefix = strip_site_prefix(filename)
 
     # 提取编号部分（在 _ 或 . 之前的部分）
     match = re.match(r'([^_\.]+)', after_prefix)
     if match:
-        return match.group(1)
+        video_id = match.group(1)
+        # 去掉尾部的无关后缀
+        for suffix in ID_STRIP_SUFFIXES:
+            if video_id.endswith(suffix):
+                video_id = video_id[:-len(suffix)]
+                break
+        return video_id
     return None
 
 
@@ -60,8 +80,7 @@ def extract_suffix(filename):
         hhd800.com@ssis00952_4K60fps.mp4    → "_4K60fps"
         hhd800.com@ATID-637.mp4            → ""
     """
-    # 去掉 hhd800.com@ 前缀
-    after_prefix = filename[len("hhd800.com@"):]
+    after_prefix = strip_site_prefix(filename)
     # 去掉扩展名
     stem = after_prefix.rsplit('.', 1)[0] if '.' in after_prefix else after_prefix
     # 去掉 video ID（第一个 _ 或 . 之前的部分）
@@ -70,6 +89,46 @@ def extract_suffix(filename):
         return ""
     suffix = stem[len(video_id):]
     return suffix
+
+
+def get_performer_from_javbus(video_id, verbose=False):
+    """
+    从JavBus获取演员名称
+
+    Args:
+        video_id: 标准番号，例如 "ABF-284"
+        verbose: 是否显示详细输出
+
+    Returns:
+        演员名称，如果获取失败则返回 None
+    """
+    url = f"https://www.javbus.com/{video_id}"
+    if verbose:
+        print(f"  Fetching: {url}")
+
+    try:
+        req = urllib.request.Request(url)
+        req.add_header('Cookie', 'existmag=mag; age=verified; dv=1')
+        req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+
+        response = urllib.request.urlopen(req, timeout=15)
+        html = response.read().decode('utf-8')
+
+        match = re.search(r'<div class="star-name"><a[^>]*>([^<]+)</a>', html)
+        if match:
+            performer_name = match.group(1).strip()
+            if verbose:
+                print(f"  Found performer: {performer_name}")
+            return performer_name
+
+        if verbose:
+            print(f"  Performer not found in JavBus page")
+        return None
+
+    except Exception as e:
+        if verbose:
+            print(f"  Error fetching from JavBus: {e}")
+        return None
 
 
 def get_performer_for_video(video_id, browser, verbose=False):
@@ -84,6 +143,13 @@ def get_performer_for_video(video_id, browser, verbose=False):
     Returns:
         演员名称，如果获取失败则返回 None
     """
+    # 标准番号格式用 JavBus
+    if is_jav_code(video_id):
+        if verbose:
+            print(f"  Detected JAV code format, using JavBus...")
+        return get_performer_from_javbus(video_id, verbose)
+
+    # 非番号格式用 DMM（原有逻辑不变）
     url = f"https://video.dmm.co.jp/av/content/?id={video_id}"
 
     if verbose:
@@ -199,7 +265,7 @@ def process_json_file(json_path, output_csv_path, min_delay=1, max_delay=3, verb
     print(f"Found {len(items)} items in data array")
 
     # 统计需要处理的文件
-    files_to_process = [item for item in items if item.get('n', '').startswith("hhd800.com@")]
+    files_to_process = [item for item in items if item.get('n', '')]
     print(f"Found {len(files_to_process)} files matching criteria\n")
 
     if not files_to_process:
