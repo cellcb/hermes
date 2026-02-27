@@ -41,6 +41,20 @@ def strip_site_prefix(filename):
     return filename
 
 
+def is_skippable(filename):
+    """检测文件是否应跳过（已重命名或不支持的类型）"""
+    after_prefix = strip_site_prefix(filename)
+    if not after_prefix:
+        return False
+    # 已重命名：以非 ASCII 字符开头（日文演员名）
+    if not after_prefix[0].isascii():
+        return True
+    # FC2PPV 无法通过 DMM/JavBus 查询
+    if after_prefix.upper().startswith('FC2PPV'):
+        return True
+    return False
+
+
 def is_jav_code(video_id):
     """判断是否为标准番号格式（如 ABF-284, DASS-821）"""
     return bool(re.match(r'^[A-Z]+-\d+$', video_id))
@@ -266,6 +280,12 @@ def process_json_file(json_path, output_csv_path, min_delay=1, max_delay=3, verb
 
     # 统计需要处理的文件
     files_to_process = [item for item in items if item.get('n', '')]
+    # 过滤已重命名及不支持的文件
+    original_count = len(files_to_process)
+    files_to_process = [item for item in files_to_process if not is_skippable(item['n'])]
+    skipped_count = original_count - len(files_to_process)
+    if skipped_count > 0:
+        print(f"Skipped {skipped_count} already renamed / unsupported files")
     print(f"Found {len(files_to_process)} files matching criteria\n")
 
     if not files_to_process:
