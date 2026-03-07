@@ -27,6 +27,7 @@ UNAR_PATH="unar"
 # 初始化数组存储没有匹配的文件
 declare -a no_match_vr_files
 declare -a no_match_4k_files
+declare -a files_to_delete
 
 # 记录已处理的VR文件，避免第二轮重复处理
 processed_files=""
@@ -46,8 +47,7 @@ while IFS= read -r rar_file; do
         if [ -n "$matches" ]; then
             echo "$matches"
             if [ "$AUTO_DELETE" = true ]; then
-                rm -f "$rar_file"
-                echo "  [已删除] $rar_file" >&2
+                files_to_delete+=("$rar_file")
             fi
         else
             no_match_vr_files+=("$rar_file")
@@ -75,8 +75,7 @@ while IFS= read -r rar_file; do
         if [ -n "$matches" ]; then
             echo "$matches"
             if [ "$AUTO_DELETE" = true ]; then
-                rm -f "$rar_file"
-                echo "  [已删除] $rar_file" >&2
+                files_to_delete+=("$rar_file")
             fi
         else
             no_match_4k_files+=("$rar_file")
@@ -103,4 +102,14 @@ fi
 
 if [ ${#no_match_vr_files[@]} -eq 0 ] && [ ${#no_match_4k_files[@]} -eq 0 ]; then
     echo "所有文件都找到了匹配内容"
+fi
+
+# 统一删除已匹配的文件
+if [ "$AUTO_DELETE" = true ] && [ ${#files_to_delete[@]} -gt 0 ]; then
+    echo ""
+    echo "=== 删除已匹配的文件 ==="
+    for f in "${files_to_delete[@]}"; do
+        rm -f "$f"
+        echo "  [已删除] $f" >&2
+    done
 fi
